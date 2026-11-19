@@ -1,0 +1,2 @@
+allow veilteed keystore2 process { ptrace }
+allow keystore2 keystore2 process { ptrace }
