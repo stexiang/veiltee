@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<AndroidAttestation>
+  <NumberOfKeyboxes>1</NumberOfKeyboxes>
+  <Keybox DeviceID="veiltee">
+    <Key algorithm="ecdsa">
+      <PrivateKey format="pem">
+-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIAiJ3stRQuLZpa25x2BcmL2JaxkIOH91KCvisP/fiALyoAoGCCqGSM49
+AwEHoUQDQgAEaCn4q2H+kMsKLKlpneXBUXCL+6HIRKbmwmSj6OEd410szTmWebpu
+0JRStIe1gBrd9bssvd2LCtDh0YLZbIqQEg==
+-----END EC PRIVATE KEY-----
+      </PrivateKey>
+      <CertificateChain>
+        <NumberOfCertificates>1</NumberOfCertificates>
+        <Certificate format="pem">
+-----BEGIN CERTIFICATE-----
+MIIBpDCCAUqgAwIBAgIJAIwV1otaJ/vGMAoGCCqGSM49BAMCMEUxCzAJBgNVBAYT
+AlVTMRAwDgYDVQQKDAdWZWlsVEVFMSQwIgYDVQQDDBtWZWlsVEVFIFRlc3QgQXR0
+ZXN0YXRpb24gQ0EwHhcNMjYxMTE5MTExMzMyWhcNMzYxMTE2MTExMzMyWjBFMQsw
+CQYDVQQGEwJVUzEQMA4GA1UECgwHVmVpbFRFRTEkMCIGA1UEAwwbVmVpbFRFRSBU
+ZXN0IEF0dGVzdGF0aW9uIENBMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaCn4
+q2H+kMsKLKlpneXBUXCL+6HIRKbmwmSj6OEd410szTmWebpu0JRStIe1gBrd9bss
+vd2LCtDh0YLZbIqQEqMjMCEwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+AYYwCgYIKoZIzj0EAwIDSAAwRQIhAOlP1rwcgcXnwMxINvm63FOU/erEmDFU5FFJ
+jvR2KVPaAiBNewA31imjgqCQqrSlgr2FMyRncfkHTBQwxWZ8CRKzgw==
+-----END CERTIFICATE-----
+        </Certificate>
+      </CertificateChain>
+    </Key>
+  </Keybox>
+</AndroidAttestation>
