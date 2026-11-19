@@ -1,0 +1,6 @@
+id=veiltee
+name=VeilTEE
+version=1.1.0
+versionCode=11000
+author=you
+description=TEE attestation veil for KernelSU. Kernel-level hiding + Binder-level attestation rewrite. No Zygisk, no LSPosed.
