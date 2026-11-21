@@ -6,147 +6,154 @@
 </p>
 
 <h1 align="center">VeilTEE</h1>
-<p align="center"><b>帷幕</b> —— 一个不依赖 Zygisk / LSPosed 的 KernelSU 模块</p>
-<p align="center">在内核层隐藏痕迹，在 Binder 事务层改写 attestation，在证书层重签 leaf</p>
+
+<p align="center"><b>A KernelSU module that needs neither Zygisk nor LSPosed.</b></p>
+<p align="center">Hides traces in user space, rewrites attestation at the Binder transaction layer, re-signs the leaf certificate at the crypto layer.</p>
+
+<p align="center">
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 ---
 
-## 它是什么
+## What it is
 
-VeilTEE 把 Android 的「设备可信状态」拆成三层，逐层接管：
+VeilTEE takes Android's "trusted device state" apart into three layers and takes over each one:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ L1 净化层   libc 拦截 + memfd 虚拟文件（无需内核补丁）          │
-│   open/stat/access/readlink 命中敏感路径 → ENOENT              │
-│   /proc/self/{status,maps,mountinfo} → memfd 净化副本          │
-│   → 检测方任何读法都拿到干净内容                                │
+│ L1  Sanitizing layer   libc interception + memfd files        │
+│     open/stat/access/readlink on sensitive paths → ENOENT     │
+│     /proc/self/{status,maps,mountinfo} → sanitized memfd copy │
+│     → every read path returns a clean view                    │
 ├──────────────────────────────────────────────────────────────┤
-│ L2 事务层   注入 keystore2，PLT/GOT 改写 ioctl                │
-│   拦截 BC_TRANSACTION / BR_REPLY，命中 generateKey 时改 reply  │
-│   → App 侧零注入、零 so、零 maps 痕迹                          │
+│ L2  Transaction layer   injected into keystore2, GOT-patched  │
+│     intercepts BC_TRANSACTION / BR_REPLY, rewrites the reply  │
+│     on generateKey                                            │
+│     → nothing injected into the app process                   │
 ├──────────────────────────────────────────────────────────────┤
-│ L3 密码层   keybox 重签 leaf                                  │
-│   保留原 attestation 公钥 + challenge，只换 RootOfTrust 扩展   │
-│   → App 用自己的私钥签 challenge，验签照样通过                  │
+│ L3  Crypto layer   leaf re-signing with a keybox              │
+│     keeps the original attestation public key and challenge,   │
+│     replaces only the RootOfTrust extension                    │
+│     → the app still signs its own challenge and verifies       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**关键设计**：注入目标是 `keystore2` daemon，不是 App。检测器在 App 进程里找不到任何注入物。
+**Key design decision:** the injection target is the `keystore2` daemon, not the app. A detector looking inside the app process finds no injected library, no extra mapping, no modified byte.
 
 ---
 
-## 特性
+## Features
 
-| 能力 | 实现 |
+| Capability | Implementation |
 |---|---|
-| **三绿 attestation** | `deviceLocked=TRUE`、`verifiedBootState=Verified`、`verifiedBootKey/Hash` 与 vbmeta 同源 |
-| **零第三方依赖** | P-256 / SHA-256 / DER / X.509 全部手写，不链接 OpenSSL |
-| **无需 susfs** | 隐藏全靠用户态 + memfd，任意 KernelSU / 内核均可 |
-| **无 Zygisk / LSPosed** | ptrace 注入 native daemon，不依赖任何 hook 框架 |
-| **GOT-only hook** | 只改 `.got.plt`，代码段零修改，`maps` 无新增可执行段 |
-| **memfd 虚拟文件** | 净化后的 `/proc/self/{status,maps,mountinfo}`，任何读法都干净 |
-| **检测对抗层** | root / hook / 调试 / 环境 / 指纹 五类检测点统一拦截 |
-| **双架构** | `arm64-v8a` + `x86_64` |
+| **Three-green attestation** | `deviceLocked=TRUE`, `verifiedBootState=Verified`, `verifiedBootKey/Hash` derived from the real vbmeta digest |
+| **Zero third-party dependencies** | P-256 / SHA-256 / DER / X.509 written from scratch; no OpenSSL linkage |
+| **No Zygisk / LSPosed** | ptrace injection into a native daemon; no hooking framework required |
+| **GOT-only hooking** | only `.got.plt` is rewritten; code segments untouched; no new executable mapping |
+| **memfd virtual files** | sanitized `/proc/self/{status,maps,mountinfo}`; every read path is clean |
+| **Detection countermeasures** | root / hook-framework / debugger / environment / fingerprint |
+| **No susfs required** | hiding is purely user-space; works on any KernelSU build |
+| **Dual ABI** | `arm64-v8a` + `x86_64` |
 
 ---
 
-## 快速开始
+## Quick start
 
 ```bash
-# 1. 安装（任意 KernelSU 版本，不需要 susfs）
+# 1. Install (any KernelSU build, no susfs patch needed)
 ksud module install VeilTEE-v1.2.0.zip
 
-# 2. 重启
+# 2. Reboot
 reboot
 
-# 3. 体检
-su -c /data/adb/modules/veiltee/bin/veilctl verify
-su -c /data/adb/modules/veiltee/bin/veilctl keybox
+# 3. Health check
+su -c /data/adb/veiltee/bin/veilctl verify
+su -c /data/adb/veiltee/bin/veilctl keybox
 ```
 
-预期输出：
+Expected output:
 
 ```
-┌─ VeilTEE 体检报告 ─────────────────────────────
+┌─ VeilTEE health check ─────────────────────────
 │ [✓] ro.boot.flash.locked                   1
 │ [✓] ro.boot.verifiedbootstate              green
 │ [✓] ro.boot.vbmeta.device_state            locked
 │ [✓] sys.oem_unlock_allowed                 0
 │ [✓] ro.boot.veritymode                     enforcing
-│ [✓] attestation 生成                       601 bytes
+│ [✓] attestation generated                  601 bytes
 ├────────────────────────────────────────────────
-│ 三绿: 3/3   KeyAttestation 全绿
+│ three-green: 3/3   KeyAttestation fully green
 └────────────────────────────────────────────────
 ```
 
 ---
 
-## 构建
+## Build
 
-需要 Android NDK（r26 测试通过）：
+Requires the Android NDK (tested on r26):
 
 ```bash
 cd src
-make NDK=$HOME/Library/Android/sdk/ndk/android-ndk-r26d    # 交叉编译
-make host                                                   # 本机密码学自检
+make NDK=$HOME/Library/Android/sdk/ndk/android-ndk-r26d    # cross-compile
+make host                                                   # host-side crypto self-test
 ```
 
-`make host` 会跑：
+`make host` runs:
 
 ```
 [PASS] SHA-256("abc")
 [PASS] SHA-256("")
 [PASS] d=1 → Q==G
-[PASS] ECDSA 签名/验签 x5
+[PASS] ECDSA sign/verify x5
 ALL PASS (0 failures)
 ```
 
 ---
 
-## 目录
+## Layout
 
 ```
 veiltee/
-├── module.prop            KSU 模块元信息
-├── customize.sh           安装脚本（按 ABI 选二进制）
-├── post-fs-data.sh        属性对齐 + vbmeta digest 落盘 + 二进制落地
-├── service.sh             启动 veilteed
+├── module.prop            KernelSU module metadata
+├── customize.sh           installer (ABI selection)
+├── post-fs-data.sh        property alignment + vbmeta digest dump + binary staging
+├── service.sh             starts veilteed
 ├── uninstall.sh
 ├── sepolicy.rule
 ├── bin/{arm64-v8a,x86_64}/{libveil.so, libveil_app.so, veilteed, veilctl}
 ├── config/{veil.conf, keybox.xml}
 └── src/
-    ├── p256.c             256 位大数 + P-256 + ECDSA
+    ├── p256.c             256-bit bignum + P-256 + ECDSA
     ├── sha256.c           SHA-256
-    ├── der.h              DER/TLV 编码器
-    ├── attest.c           KeyDescription + RootOfTrust + X.509 签发
-    ├── plthook.c          GOT 改写
-    ├── payload.c          Binder 事务拦截
-    ├── rewrite.c          Parcel 证书扫描与等长替换
-    ├── hardening.c        检测对抗（root/hook/debug）
-    ├── fingerprint.c      设备指纹一致性
-    ├── injector.c         ptrace 注入
-    ├── veilteed.c         主守护
-    ├── veilctl.c          体检 CLI
-    ├── keybox_check.c     keybox 链验证
-    └── selftest.c         host 自检
+    ├── der.h              DER/TLV encoder
+    ├── attest.c           KeyDescription + RootOfTrust + X.509 issuance
+    ├── plthook.c          GOT rewriting
+    ├── payload.c          Binder transaction interception
+    ├── rewrite.c          Parcel certificate scanning + equal-length replacement
+    ├── hardening.c        detection countermeasures (root/hook/debug)
+    ├── fingerprint.c      device fingerprint consistency
+    ├── injector.c         ptrace injection (memfd loader)
+    ├── veilteed.c         main daemon
+    ├── veilctl.c          diagnostics CLI
+    ├── keybox_check.c     keybox chain validation
+    └── selftest.c         host self-test
 ```
 
 ---
 
-## 配置
+## Configuration
 
 ```ini
 # config/veil.conf
 enabled=1
-device_locked=1        # 第一绿
-boot_state=0           # 第二绿：0=Verified
+device_locked=1        # green #1
+boot_state=0           # green #2: 0=Verified
 security_level=1       # 1=TEE
 os_version=16
 patch_level=2026-11-05
-vb_key=                # 留空 → 读 /data/adb/veiltee/vb_key
-vb_hash=               # 留空 → 读 /data/adb/veiltee/vb_hash
+vb_key=                # empty → read /data/adb/veiltee/vb_key
+vb_hash=               # empty → read /data/adb/veiltee/vb_hash
 state_dir=/data/adb/veiltee
 keybox=/data/adb/modules/veiltee/config/keybox.xml
 ```
@@ -155,104 +162,121 @@ keybox=/data/adb/modules/veiltee/config/keybox.xml
 
 ## keybox
 
-`config/keybox.xml` 默认是**自签测试 CA**，用于验证完整链路。它能让 `RootOfTrust` 三绿，但链根不在 Google 信任列表。
+`config/keybox.xml` ships with a **self-signed test CA** so the full chain can be exercised locally. It produces a fully green `RootOfTrust`, but its root is not in Google's trust store.
 
-用 `veilctl keybox` 验证任何 keybox：
+Validate any keybox with:
 
 ```bash
 veilctl keybox /sdcard/candidate.xml
 ```
 
-判定标准只有一条：**链根 subject 是 `Google Hardware Attestation Root`**。
+The only criterion that matters: **the chain root subject is `Google Hardware Attestation Root`**.
 
-| 来源 | 字段三绿 | 过严格链校验 |
+| Source | Fields green | Passes strict chain validation |
 |---|---|---|
-| 自签（默认） | ✅ | ❌ |
+| Self-signed (default) | ✅ | ❌ |
 | AOSP test key | ✅ | ❌ |
-| 厂商硬件 keybox | ✅ | ✅（未吊销时） |
+| Vendor hardware keybox | ✅ | ✅ (until revoked) |
+
+The checker verifies six things:
+
+1. private key parses as EC P-256
+2. every certificate in the chain parses
+3. subject / issuer / validity windows per certificate
+4. private key matches the leaf public key
+5. each certificate is signed by the next one up (real P-256 verification)
+6. root identity classification (`0` = Google root, `2` = self-signed)
 
 ---
 
-## 检测覆盖
+## Detection coverage
 
-| 类别 | 检测点 | 拦截位置 |
+`libveil_app.so` is injected into target apps and covers:
+
+| Category | Detection point | Interception |
 |---|---|---|
-| Root 路径 | `su` / `magisk` / `ksu` 文件 | `open/stat/access/readlink` → `ENOENT` |
-| Root 执行 | `Runtime.exec("su")` | `execve` → `ENOENT` |
-| 调试 | `PTRACE_TRACEME` | 直接返回 0 |
-| TracerPid | `/proc/self/status` | memfd 虚拟文件，值归零 |
-| maps 扫描 | `magisk`/`frida`/`xposed`/`libveil` | memfd 虚拟 maps，敏感行剔除 |
-| 挂载表 | overlay / magisk | memfd 虚拟挂载表 |
-| 属性 | `ro.boot.*` / `ro.debuggable` | `__system_property_get` 覆盖 |
-| 设备指纹 | Build / serial / MAC | 属性层 + `SIOCGIFHWADDR` |
-| Attestation | `RootOfTrust` | keystore2 层重签 |
+| Root paths | `su` / `magisk` / `ksu` / `superuser` files | `open/openat/stat/lstat/access/readlink` → `ENOENT` |
+| Root execution | `Runtime.exec("su")` / `which su` | `execve` → `ENOENT` |
+| Debugger | `Debug.isDebuggerConnected` / `PTRACE_TRACEME` | `ptrace` returns 0 |
+| TracerPid | `/proc/self/status` | memfd copy with value zeroed |
+| maps scanning | `magisk` / `frida` / `xposed` / `libveil` | memfd copy with matching lines dropped |
+| Mount table | overlay / magisk entries | memfd copy |
+| Process table | `/proc/net/tcp` frida ports 27042/27043 | memfd copy |
+| Property probing | `getprop` on magisk/ksu keys | `__system_property_get` filter |
+| Boot state | `ro.boot.*` | property layer override |
+| Device fingerprint | Build / serial / MAC | property layer + `SIOCGIFHWADDR` |
+| Attestation | `RootOfTrust` | keystore2 layer re-signing |
 
 ---
 
-## 原理速览
+## How it works
 
-1. **注入**：`ptrace(ATTACH)` → 远程 `mmap` → 写 so 路径 → 远程 `dlopen`，构造函数即 hook 安装点。`lr=0` 触发 `SIGSEGV` 捕获返回值，是整个远程调用能跑通的关键。
-2. **拦截**：`dl_iterate_phdr` 遍历已加载 so，解析 `DT_JMPREL`，按 `R_AARCH64_JUMP_SLOT` 匹配符号名，改写 GOT 槽位。
-3. **改写**：Parcel 是裸字节流，用 ASN.1 特征（OID `1.3.6.1.4.1.11129.2.1.17`）定位证书，保留公钥与 challenge，只替换 `RootOfTrust` 并重签，最后等长替换（未定义 tag 填充）。
-4. **签名**：P-256（Jacobian + 4-bit 窗口，单签 ~70ms）+ SHA-256 + 手写 X.509。
-5. **隐藏**：进程名伪装（`prctl` + 覆盖 `argv[0]`）→ memfd 内存加载（maps 里是 `/memfd:veil (deleted)`）→ libc 层 `/proc` 净化 → GOT-only hook。全部在用户态完成，不需要内核补丁。
+1. **Injection** — `ptrace(ATTACH)` → remote `mmap` → write the library into a `memfd` → remote `dlopen`. The constructor runs at that instant, which is where the hook is installed. Setting `lr = 0` before `PTRACE_CONT` turns the function return into a `SIGSEGV`, which is how the remote call result is captured.
+
+2. **Interception** — `dl_iterate_phdr` walks every loaded library, parses `PT_DYNAMIC`, matches `R_AARCH64_JUMP_SLOT` relocations by symbol name, and rewrites the GOT slot. A single 8-byte pointer changes; not a single bit of code is touched.
+
+3. **Rewriting** — a Binder `Parcel` is treated as a raw byte stream. The attestation certificate is located by its ASN.1 OID (`1.3.6.1.4.1.11129.2.1.17`), the leaf public key and challenge are preserved, only the `RootOfTrust` extension is regenerated, and the result is swapped in at equal length (padding with an unassigned context tag).
+
+4. **Signing** — P-256 with Jacobian coordinates and a 4-bit window (~70 ms per signature), plus SHA-256 and a hand-written X.509 encoder.
+
+5. **Hiding** — process name disguise (`prctl` + `argv[0]` overwrite) → memfd loading (`maps` shows `/memfd:veil (deleted)`) → libc-level `/proc` sanitizing → GOT-only hooking. Everything happens in user space.
 
 ---
 
-## 为什么不需要 susfs
+## Why no susfs
 
-susfs 解决的是「内核可见性」——让 `/proc/mounts`、`/proc/self/maps`、`stat()` 在内核层就看不到模块痕迹。
+susfs addresses *kernel-visible* traces: it filters `/proc/mounts`, `/proc/self/maps` and `stat()` at the kernel level.
 
-但对 App 而言，**所有检测最终都走 libc**：
+But for an app, **every detection ultimately goes through libc**:
 
 ```
-File.exists()        → access()
-File.length()        → stat()
-new FileInputStream  → open()
-Runtime.exec("su")   → execve()
+File.exists()             → access()
+File.length()             → stat()
+new FileInputStream()     → open()
+Runtime.exec("su")        → execve()
 Debug.isDebuggerConnected → ptrace()
 ```
 
-所以 `libveil_app.so` 直接 hook 这几个 libc 函数，**在用户态达到与 susfs 相同的观测效果**：
+Hooking those libc functions in `libveil_app.so` therefore produces the same observable result from the app's point of view:
 
-| 场景 | susfs | 本模块（无 susfs） |
+| Scenario | susfs | VeilTEE (no susfs) |
 |---|---|---|
-| App 扫 `/data/adb/modules` | 内核隐藏 | `open` 返回 `ENOENT` |
-| App 读 `/proc/self/maps` | 内核过滤 | memfd 返回净化副本 |
-| App 读 `/proc/self/status` | 内核过滤 | `TracerPid` 归零 |
-| App `which su` | 内核隐藏 | `access/execve` 返回 `ENOENT` |
-| **root shell 直接看** | 需 susfs | 看得到（这是唯一差别） |
+| App scans `/data/adb/modules` | kernel hide | `open` returns `ENOENT` |
+| App reads `/proc/self/maps` | kernel filter | sanitized memfd copy |
+| App reads `/proc/self/status` | kernel filter | `TracerPid` zeroed |
+| App runs `which su` | kernel hide | `access/execve` returns `ENOENT` |
+| **Root shell inspects directly** | needs susfs | visible — the only real gap |
 
-最后一行是真实差距：**有 root 权限的检测方**能绕过 libc 看到原始状态。但这类检测在 App 场景中极少——它们需要先拿到 root，而拿到 root 本身就已经是最高级别信号。
+The last row is the honest difference: a detector that already holds root can bypass libc and read raw state. In practice such detectors are rare, because holding root is already the strongest possible signal.
 
-### 隐藏三件套（全部用户态）
+### The three hiding primitives (all user-space)
 
 ```c
-// 1) 进程名伪装：/proc/pid/cmdline 显示 logd
+// 1) Process name disguise → /proc/pid/cmdline reads "logd"
 prctl(PR_SET_NAME, "logd", 0, 0, 0);
 memset(argv[0], 0, strlen(argv[0]));
 strcpy(argv[0], "logd");
 
-// 2) memfd 内存加载：so 不在磁盘上可加载，maps 显示 /memfd:veil (deleted)
+// 2) memfd loading → the library never exists as a loadable file
 memfd_create("veil") → write(so) → dlopen("/proc/self/fd/N")
 
-// 3) 二进制落地到 /data/adb/veiltee/bin，不从模块目录执行
+// 3) Binaries staged under /data/adb/veiltee/bin, never executed from the module mount
 ```
 
 ---
 
-## 边界
+## Boundaries
 
-- `MEETS_STRONG_INTEGRITY` 需要 TEE 内的设备私钥，软件层触及不到；取决于 keybox 是否有效。
-- **本模块不改任何分区**，不触碰 `boot` / `lk` / `vbmeta`。
-- 若设备此前自行 patch 过引导链（例如改 `lk` 或 `boot` 做伪回锁），分区 hash 会与官方固件不一致。这类「读分区比对 hash」的检测不在覆盖范围内——它需要的是**未修改的分区内容**，和 attestation 是两条独立的链路。
-- 传感器行为分析、多开容器检测未覆盖。
+- `MEETS_STRONG_INTEGRITY` requires the device private key held inside the TEE; software layers cannot reach it. Outcome depends on whether the supplied keybox is valid.
+- **The module modifies no partition.** It does not touch `boot`, `lk` or `vbmeta`.
+- If the device previously had its boot chain patched (for example `lk` or `boot` modified for a fake relock), partition hashes will differ from the stock firmware. Detectors that compare partition hashes against stock images are outside the coverage of this module — they need genuinely unmodified partition contents, which is an independent chain from attestation.
+- Sensor behaviour analysis and multi-instance (app-cloning) detection are not covered.
 
 ---
 
-## 免责
+## Disclaimer
 
-本项目用于 Android 安全机制研究、attestation 协议分析与自有设备调试。使用前请确认你拥有设备的完全控制权，并自行承担一切后果。
+This project is intended for Android security research, attestation protocol analysis, and debugging devices you own. Confirm you have full control of the device before use, and accept all consequences of doing so.
 
 ---
 
