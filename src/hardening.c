@@ -60,6 +60,8 @@ static const char *ROOT_PATHS[] = {
     "/system/etc/init.d/99SuperSUDaemon", "/dev/com.koushikdutta.superuser.daemon",
     "magisk", "Magisk", "supersu", "SuperSU", "busybox",
     "frida", "Frida", "xposed", "Xposed", "lsposed", "LSPosed",
+    /* LKM 模式：kernelsu.ko 会出现在 /proc/modules 与 /sys/module/ */
+    "kernelsu", "KernelSU", "kernelsu.ko",
     NULL
 };
 
@@ -81,7 +83,9 @@ static int is_sanitize_target(const char *path) {
            !strcmp(path, "/proc/mounts")         ||
            !strcmp(path, "/proc/net/tcp")        ||
            !strcmp(path, "/proc/net/tcp6")       ||
-           !strcmp(path, "/proc/self/cmdline");
+           !strcmp(path, "/proc/self/cmdline")   ||
+           !strcmp(path, "/proc/modules")        ||
+           !strcmp(path, "/proc/kallsyms");
 }
 
 /* 读原文件并净化 */
