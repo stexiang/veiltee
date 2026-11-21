@@ -244,7 +244,8 @@ memfd_create("veil") → write(so) → dlopen("/proc/self/fd/N")
 ## 边界
 
 - `MEETS_STRONG_INTEGRITY` 需要 TEE 内的设备私钥，软件层触及不到；取决于 keybox 是否有效。
-- `lk` 分区 hash 与官方固件不同（patch LK 的固有代价，本模块不改分区）。
+- **本模块不改任何分区**，不触碰 `boot` / `lk` / `vbmeta`。
+- 若设备此前自行 patch 过引导链（例如改 `lk` 或 `boot` 做伪回锁），分区 hash 会与官方固件不一致。这类「读分区比对 hash」的检测不在覆盖范围内——它需要的是**未修改的分区内容**，和 attestation 是两条独立的链路。
 - 传感器行为分析、多开容器检测未覆盖。
 
 ---
